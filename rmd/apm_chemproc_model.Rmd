@@ -1,0 +1,140 @@
+---
+title: "apm_chemmanproc_modeling"
+author: "Kevin Cooper"
+date: "1/12/2021"
+output: html_document
+---
+
+The purpose of this is to take a look at Max Kuhn's Applied Predictive Modeling, particularly at the Chemical Manufacturing Process dataset. Also a goal of mine has been to learn tidymodeling a little more.
+
+# Data Ingestion 
+```{r, results='hide', message = FALSE,}
+require(AppliedPredictiveModeling)
+
+#This process is ugly, can fix later.
+data(ChemicalManufacturingProcess)
+df <- ChemicalManufacturingProcess
+rm(ChemicalManufacturingProcess)
+```
+## Get Libraries 
+```{r, warning = FALSE, message = FALSE, results = 'hide'}
+require(here)
+source(here("project_config.R"))
+```
+
+# Data Overview & Quality 
+Incredibly small dataset. It's either one extreme or another.
+```{r}
+dim(df)
+```
+All variables are numeric. This never happens in the real world.
+```{r}
+sapply(df,class)
+```
+
+The names look incredibly unuseful from a process standpoint.
+```{r}
+names(df)
+```
+Let's take a look at empties. Steal more code from here:
+https://jenslaufer.com/data/analysis/visualize_missing_values_with_ggplot.html
+
+This isn't the prettiest, and not normally what I go after, but achieves the purpose.
+```{r, fig.width = 8, fig.height = 6}
+na_vals <- function(df){
+  p <- df %>% 
+    mutate(id = row_number()) %>% 
+    gather(-id, key = "key", value = "val") %>% #Should update this to pivot_longer later
+    mutate(isna = is.na(val)) %>% 
+    ggplot(aes(x = key, y = id, fill = isna)) +
+    geom_raster(alpha = 0.8) +
+    scale_fill_manual(name = "",
+                      values = c("steelblue","tomato3"),
+                      labels = c("Present","Missing")) +
+    #scale_x_discrete(limits = levels) +
+    labs(x = "Variable",
+         y = "Row Number",
+         title = "Missing values in rows") + 
+    coord_flip()
+  
+  return(p)
+}
+na_vals(df)
+
+rm(na_vals)
+```
+Normally there is a timestamp variable. This dataset doesn't provide one. I think it will be more 'fun' to not assume that there is a time series elements. So we could assume that these are occasional process samples taken.
+
+The reason I mention that is because most of the blanks are at the front and at the end. More often than not, I'll run a linear interpolation for all the blanks inbetween and simply remove the first (and last) mostly blank rows.
+
+For now, let's focus on modeling and just go after the full rows. According to this visual, we shouldn't lose a significant number of rows. Another fun option is predicting the non-target variables. Maybe later.
+
+```{r}
+df <- df %>% filter(complete.cases(.))
+
+df %>% dim()
+```
+Calling that good enough. In the future we can look for outliers, but I want to move to modeling.
+
+# Modeling 
+From the previous visual, I can assume the problem is to predict the yield using the remaining data. I haven't learned tidy modeling to my preference, so I plan to walk through the examples in Max Kuhn's Tidy Modeling With R: tmwr.org
+
+## Split data 
+```{r}
+set.seed(1234)
+require(tidymodels)
+
+chemproc_split <- initial_split(df, prop = 0.7)
+
+chemproc_split
+```
+```{r}
+chem_train <- training(chemproc_split)
+chem_test <- testing(chemproc_split)
+```
+## Build the recipe 
+I'll start by using all the variables to predict, this is almost never a good idea.
+```{r}
+simple_chem <- recipe(Yield ~ ., data = chem_train)
+
+simple_chem
+```
+## Create models 
+Start with the basics
+```{r}
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_model
+```
+```{r}
+lm_wflow <- workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(simple_chem)
+
+lm_fit <- fit(lm_wflow, chem_train)
+```
+Can you imagine programming this in PI? This is where too many variables gets silly
+```{r}
+lm_fit
+```
+## Performance 
+Not sure I like this process, wasn't a fan of bind_cols, understood it after trying to avoid with mutate (don't--that will save 15 minutes)
+```{r}
+chem_test_res <- predict(lm_fit, new_data = chem_test %>% select(-Yield)) %>% 
+  bind_cols(., chem_test %>% select(Yield))
+```
+
+I've seen worse models to start with.
+```{r}
+chem_test_res %>% 
+  ggplot(aes(x=Yield,y=.pred)) +
+  geom_point() +
+  geom_abline(lty = 2)
+```
+```{r}
+chem_metrics <- metric_set(rmse, rsq, mae)
+
+chem_metrics(chem_test_res, truth = Yield, estimate = .pred)
+```
+
+That gives us a starting place! Looking forward to any feedback!
