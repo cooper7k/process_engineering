@@ -2,7 +2,7 @@
 title: "apm_chemmanproc_modeling"
 author: "Kevin Cooper"
 date: "1/12/2021"
-output: html_document
+output: github_document
 ---
 
 The purpose of this is to take a look at Max Kuhn's Applied Predictive Modeling, particularly at the Chemical Manufacturing Process dataset. Also a goal of mine has been to learn tidymodeling a little more.
